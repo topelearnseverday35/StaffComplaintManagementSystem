@@ -1,17 +1,12 @@
 package FinalYearProject.StaffComplaintMgmtSystem.service;
 
-
-import FinalYearProject.StaffComplaintMgmtSystem.dto.ComplaintResponse;
-import FinalYearProject.StaffComplaintMgmtSystem.dto.ComplaintSummary;
-import FinalYearProject.StaffComplaintMgmtSystem.dto.SubmitComplaintRequest;
-import FinalYearProject.StaffComplaintMgmtSystem.dto.UpdateComplaintRequest;
+import FinalYearProject.StaffComplaintMgmtSystem.dto.*;
 import FinalYearProject.StaffComplaintMgmtSystem.entities.StaffComplaint;
 import FinalYearProject.StaffComplaintMgmtSystem.entities.StaffIdentity;
+import FinalYearProject.StaffComplaintMgmtSystem.enums.EscalationLevel;
+import FinalYearProject.StaffComplaintMgmtSystem.enums.Roles;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Status;
-
-import FinalYearProject.StaffComplaintMgmtSystem.events.ComplaintAssignedEvents;
-import FinalYearProject.StaffComplaintMgmtSystem.events.ComplaintStatusUpdatedEvents;
-import FinalYearProject.StaffComplaintMgmtSystem.events.ComplaintSubmittedEvents;
+import FinalYearProject.StaffComplaintMgmtSystem.events.*;
 import FinalYearProject.StaffComplaintMgmtSystem.repository.StaffComplaintRepo;
 import FinalYearProject.StaffComplaintMgmtSystem.repository.StaffIdentityRepo;
 import jakarta.persistence.EntityNotFoundException;
@@ -35,34 +30,49 @@ public class ComplaintService {
 
     private final StaffComplaintRepo complaintRepository;
     private final ApplicationEventPublisher eventPublisher;
-    private final StaffIdentityRepo repo;
+    private final StaffIdentityRepo staffIdentityRepo;
 
     // ─────────────────────────────────────────────────────────
-    // STAFF: Submit a complaint
+    // STAFF / HOD: Submit a complaint
     // ─────────────────────────────────────────────────────────
+
+    /**
+     * Any authenticated staff (LECTURER or HOD) can submit a complaint.
+     *
+     * Visibility rules applied at submission time:
+     *  - LECTURER submits → escalationLevel = HOD_LEVEL  → only HODs can see it
+     *  - HOD submits      → submittedByRole = 'HOD'       → only DEANs can see it
+     */
     @Transactional
     public ComplaintResponse submitComplaint(SubmitComplaintRequest request) {
-        log.info("Submit Complaint Request - {}",request);
+        log.info("Submit Complaint Request - {}", request);
         StaffIdentity currentUser = getAuthenticatedUser();
-        log.info(" User - {} has been authenticated",currentUser.getStaffFirstName());
+        log.info("User - {} has been authenticated", currentUser.getStaffFirstName());
+
+        // HOD complaints go straight to DEAN_LEVEL visibility
+        EscalationLevel initialLevel = (currentUser.getRole() == Roles.HOD)
+                ? EscalationLevel.DEAN_LEVEL
+                : EscalationLevel.HOD_LEVEL;
 
         StaffComplaint complaint = StaffComplaint.builder()
                 .title(request.getTitle())
                 .description(request.getDescription())
-                .category(request.getCategory() != null ? request.getCategory() :
-                        FinalYearProject.StaffComplaintMgmtSystem.enums.Category.GENERAL)
-                .priority(request.getPriority() != null ? request.getPriority() :
-                        FinalYearProject.StaffComplaintMgmtSystem.enums.Priority.MEDIUM)
+                .category(request.getCategory() != null ? request.getCategory()
+                        : FinalYearProject.StaffComplaintMgmtSystem.enums.Category.GENERAL)
+                .priority(request.getPriority() != null ? request.getPriority()
+                        : FinalYearProject.StaffComplaintMgmtSystem.enums.Priority.MEDIUM)
                 .status(Status.OPEN)
+                .escalationLevel(initialLevel)
                 .submittedByStaffId(currentUser.getStaffId())
                 .submittedByName(currentUser.getStaffFirstName() + " " + currentUser.getStaffLastName())
                 .submittedByEmail(currentUser.getStaffEmail())
+                .submittedByRole(currentUser.getRole().name())
                 .build();
 
         StaffComplaint saved = complaintRepository.save(complaint);
-        log.info("Complaint #{} submitted by staff {}", saved.getId(), currentUser.getStaffId());
+        log.info("Complaint #{} submitted by {} ({})", saved.getId(),
+                currentUser.getStaffId(), currentUser.getRole());
 
-        // Fire event → triggers email to staff + all admins
         eventPublisher.publishEvent(new ComplaintSubmittedEvents(
                 this, saved, currentUser.getStaffEmail(),
                 currentUser.getStaffFirstName() + " " + currentUser.getStaffLastName()
@@ -96,31 +106,104 @@ public class ComplaintService {
     }
 
     // ─────────────────────────────────────────────────────────
-    // ADMIN: Get all complaints (paginated, optional status filter)
+    // ADMIN: Get complaints — role-filtered
+    //   HOD  → sees only HOD_LEVEL complaints (from LECTURERs, not yet escalated)
+    //   DEAN → sees DEAN_LEVEL complaints (escalated) + HOD's own complaints
     // ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public Page<ComplaintSummary> getAllComplaints(Status statusFilter, Pageable pageable) {
-        if (statusFilter != null) {
-            return complaintRepository.findByStatus(statusFilter, pageable).map(this::toSummary);
+        StaffIdentity currentUser = getAuthenticatedUser();
+
+        if (currentUser.getRole() == Roles.HOD) {
+            // HOD sees only complaints still at HOD level (LECTURER submissions, not escalated)
+            if (statusFilter != null) {
+                return complaintRepository
+                        .findByEscalationLevelAndStatus(EscalationLevel.HOD_LEVEL, statusFilter, pageable)
+                        .map(this::toSummary);
+            }
+            return complaintRepository
+                    .findByEscalationLevel(EscalationLevel.HOD_LEVEL, pageable)
+                    .map(this::toSummary);
+
+        } else if (currentUser.getRole() == Roles.DEAN) {
+            // DEAN sees escalated complaints + HOD's own complaints
+            if (statusFilter != null) {
+                return complaintRepository
+                        .findComplaintsVisibleToDeanByStatus(statusFilter, pageable)
+                        .map(this::toSummary);
+            }
+            return complaintRepository
+                    .findComplaintsVisibleToDean(pageable)
+                    .map(this::toSummary);
         }
-        return complaintRepository.findAll(pageable).map(this::toSummary);
+
+        throw new SecurityException("Your role does not have permission to view complaints");
     }
 
     // ─────────────────────────────────────────────────────────
-    // ADMIN: Get single complaint by ID
+    // ADMIN: Get single complaint by ID — with role visibility check
     // ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public ComplaintResponse getComplaintById(Long id) {
-        return toResponse(findById(id));
+        StaffIdentity currentUser = getAuthenticatedUser();
+        StaffComplaint complaint = findById(id);
+        assertCanView(currentUser, complaint);
+        return toResponse(complaint);
     }
 
     // ─────────────────────────────────────────────────────────
-    // ADMIN: Update complaint status / add response / assign manager
+    // HOD: Escalate a complaint up to Dean level
+    // ─────────────────────────────────────────────────────────
+    @Transactional
+    public ComplaintResponse escalateComplaint(EscalateComplaintRequest request) {
+        StaffIdentity hod = getAuthenticatedUser();
+
+        if (hod.getRole() != Roles.HOD) {
+            throw new SecurityException("Only HODs can escalate complaints to Dean level");
+        }
+
+        StaffComplaint complaint = findById(request.getId());
+
+        // Guard: only HOD_LEVEL complaints can be escalated
+        if (complaint.getEscalationLevel() == EscalationLevel.DEAN_LEVEL) {
+            throw new RuntimeException("Complaint #" + request.getId() + " has already been escalated to Dean level");
+        }
+
+        // Guard: HOD can only escalate complaints they can see (HOD_LEVEL / LECTURER complaints)
+        if (complaint.getEscalationLevel() != EscalationLevel.HOD_LEVEL) {
+            throw new SecurityException("You do not have access to this complaint");
+        }
+
+        complaint.setEscalationLevel(EscalationLevel.DEAN_LEVEL);
+        complaint.setEscalatedByStaffId(hod.getStaffId());
+        complaint.setEscalatedByName(hod.getStaffFirstName() + " " + hod.getStaffLastName());
+        complaint.setEscalatedAt(LocalDateTime.now());
+        complaint.setEscalationNote(request.getEscalationNote());
+
+        StaffComplaint updated = complaintRepository.save(complaint);
+        log.info("Complaint #{} escalated to DEAN level by HOD {}", updated.getId(), hod.getStaffId());
+
+        // Notify all Deans by event
+        eventPublisher.publishEvent(new ComplaintEscalatedEvents(
+                this, updated,
+                hod.getStaffFirstName() + " " + hod.getStaffLastName(),
+                request.getEscalationNote()
+        ));
+
+        return toResponse(updated);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // ADMIN: Update complaint — with role visibility check
     // ─────────────────────────────────────────────────────────
     @Transactional
     public ComplaintResponse updateComplaint(Long id, UpdateComplaintRequest request) {
         StaffIdentity admin = getAuthenticatedUser();
         StaffComplaint complaint = findById(id);
+
+        // Enforce that the admin can only update complaints they can see
+        assertCanView(admin, complaint);
+
         Status previousStatus = complaint.getStatus();
 
         if (request.getStatus() != null) {
@@ -136,7 +219,6 @@ public class ComplaintService {
         complaint.setHandledById(admin.getStaffId());
         complaint.setHandledByName(admin.getStaffFirstName() + " " + admin.getStaffLastName());
 
-        // Handle manager assignment
         boolean isNewAssignment = false;
         if (request.getAssignedManagerId() != null && !request.getAssignedManagerId().isBlank()) {
             isNewAssignment = !request.getAssignedManagerId().equals(complaint.getAssignedManagerId());
@@ -145,9 +227,8 @@ public class ComplaintService {
         }
 
         StaffComplaint updated = complaintRepository.save(complaint);
-        log.info("Complaint #{} updated by admin {}", id, admin.getStaffId());
+        log.info("Complaint #{} updated by {} ({})", id, admin.getStaffId(), admin.getRole());
 
-        // Fire status update event → notifies original submitter
         if (request.getStatus() != null && !previousStatus.equals(request.getStatus())) {
             eventPublisher.publishEvent(new ComplaintStatusUpdatedEvents(
                     this, updated, previousStatus,
@@ -156,9 +237,8 @@ public class ComplaintService {
             ));
         }
 
-        // Fire assignment event → notifies manager
         if (isNewAssignment) {
-            repo.findByStaffId(request.getAssignedManagerId())
+            staffIdentityRepo.findByStaffId(request.getAssignedManagerId())
                     .ifPresent(manager -> eventPublisher.publishEvent(new ComplaintAssignedEvents(
                             this, updated,
                             manager.getStaffEmail(),
@@ -171,40 +251,78 @@ public class ComplaintService {
     }
 
     // ─────────────────────────────────────────────────────────
-    // ADMIN: Delete a complaint
+    // ADMIN: Delete a complaint — with role visibility check
     // ─────────────────────────────────────────────────────────
     @Transactional
     public void deleteComplaint(Long id) {
+        StaffIdentity currentUser = getAuthenticatedUser();
         StaffComplaint complaint = findById(id);
+        assertCanView(currentUser, complaint);
         complaintRepository.delete(complaint);
-        log.info("Complaint #{} deleted", id);
+        log.info("Complaint #{} deleted by {}", id, currentUser.getStaffId());
     }
 
     // ─────────────────────────────────────────────────────────
-    // ADMIN: Search by title keyword
+    // ADMIN: Search — role-filtered
     // ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public Page<ComplaintSummary> searchComplaints(String keyword, Pageable pageable) {
-        return complaintRepository.searchByTitle(keyword, pageable).map(this::toSummary);
+        StaffIdentity currentUser = getAuthenticatedUser();
+
+        if (currentUser.getRole() == Roles.HOD) {
+            return complaintRepository
+                    .searchByTitleForHod(keyword, EscalationLevel.HOD_LEVEL, pageable)
+                    .map(this::toSummary);
+        } else if (currentUser.getRole() == Roles.DEAN) {
+            return complaintRepository
+                    .searchByTitleForDean(keyword, pageable)
+                    .map(this::toSummary);
+        }
+
+        throw new SecurityException("Your role does not have search access");
     }
 
     // ─────────────────────────────────────────────────────────
-    // DASHBOARD STATS (admin)
+    // DASHBOARD STATS — role-aware
     // ─────────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public Map<String, Long> getDashboardStats() {
+        StaffIdentity currentUser = getAuthenticatedUser();
         Map<String, Long> stats = new HashMap<>();
-        stats.put("total", complaintRepository.count());
-        stats.put("open", complaintRepository.countByStatus(Status.OPEN));
-        stats.put("inProgress", complaintRepository.countByStatus(Status.IN_PROGRESS));
-        stats.put("resolved", complaintRepository.countByStatus(Status.RESOLVED));
-        stats.put("closed", complaintRepository.countByStatus(Status.CLOSED));
+
+        if (currentUser.getRole() == Roles.HOD) {
+            // HOD stats: only HOD_LEVEL complaints
+            stats.put("total", complaintRepository.countByEscalationLevel(EscalationLevel.HOD_LEVEL));
+            stats.put("open", complaintRepository.findByEscalationLevelAndStatus(
+                    EscalationLevel.HOD_LEVEL, Status.OPEN,
+                    org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("inProgress", complaintRepository.findByEscalationLevelAndStatus(
+                    EscalationLevel.HOD_LEVEL, Status.IN_PROGRESS,
+                    org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("resolved", complaintRepository.findByEscalationLevelAndStatus(
+                    EscalationLevel.HOD_LEVEL, Status.RESOLVED,
+                    org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("escalated", complaintRepository.countByEscalationLevel(EscalationLevel.DEAN_LEVEL));
+
+        } else {
+            // DEAN stats: DEAN_LEVEL + HOD submissions
+            stats.put("total", complaintRepository.findComplaintsVisibleToDean(
+                    org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("open", complaintRepository.findComplaintsVisibleToDeanByStatus(
+                    Status.OPEN, org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("inProgress", complaintRepository.findComplaintsVisibleToDeanByStatus(
+                    Status.IN_PROGRESS, org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+            stats.put("resolved", complaintRepository.findComplaintsVisibleToDeanByStatus(
+                    Status.RESOLVED, org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements());
+        }
+
         return stats;
     }
 
     // ─────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────
+
     private StaffComplaint findById(Long id) {
         return complaintRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Complaint not found with id: " + id));
@@ -212,11 +330,29 @@ public class ComplaintService {
 
     private StaffIdentity getAuthenticatedUser() {
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-
-        if (principal instanceof StaffIdentity) {
-            return (StaffIdentity) principal;
+        if (principal instanceof StaffIdentity staffIdentity) {
+            return staffIdentity;
         }
         throw new EntityNotFoundException("Authenticated user not found in security context");
+    }
+
+    /**
+     * Checks whether the current admin role is allowed to view/act on a complaint.
+     *   HOD  → can only see HOD_LEVEL complaints
+     *   DEAN → can only see DEAN_LEVEL complaints OR complaints submitted by HODs
+     */
+    private void assertCanView(StaffIdentity user, StaffComplaint complaint) {
+        boolean canView = switch (user.getRole()) {
+            case HOD  -> complaint.getEscalationLevel() == EscalationLevel.HOD_LEVEL;
+            case DEAN -> complaint.getEscalationLevel() == EscalationLevel.DEAN_LEVEL
+                    || "HOD".equals(complaint.getSubmittedByRole());
+            default   -> false;
+        };
+
+        if (!canView) {
+            throw new SecurityException(
+                    "Access denied: you do not have permission to view complaint #" + complaint.getId());
+        }
     }
 
     private ComplaintResponse toResponse(StaffComplaint c) {
@@ -227,12 +363,17 @@ public class ComplaintService {
                 .category(c.getCategory())
                 .priority(c.getPriority())
                 .status(c.getStatus())
+                .escalationLevel(c.getEscalationLevel())
+                .escalatedByName(c.getEscalatedByName())
+                .escalatedAt(c.getEscalatedAt())
+                .escalationNote(c.getEscalationNote())
                 .adminResponse(c.getAdminResponse())
                 .handledById(c.getHandledById())
                 .handledByName(c.getHandledByName())
                 .submittedByStaffId(c.getSubmittedByStaffId())
                 .submittedByName(c.getSubmittedByName())
                 .submittedByEmail(c.getSubmittedByEmail())
+                .submittedByRole(c.getSubmittedByRole())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
                 .resolvedAt(c.getResolvedAt())
@@ -246,7 +387,9 @@ public class ComplaintService {
                 .category(c.getCategory())
                 .priority(c.getPriority())
                 .status(c.getStatus())
+                .escalationLevel(c.getEscalationLevel())
                 .submittedByName(c.getSubmittedByName())
+                .submittedByRole(c.getSubmittedByRole())
                 .createdAt(c.getCreatedAt())
                 .build();
     }

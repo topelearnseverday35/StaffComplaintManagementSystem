@@ -14,18 +14,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
-public class GlobalExceptionHandler extends  Exception {
-
-    // Handle all uncaught exceptions
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Object> handleGeneralException(Exception ex) {
-        Map<String, Object> errorBody = new HashMap<>();
-        errorBody.put("timestamp", LocalDateTime.now());
-        errorBody.put("message", "An unexpected error occurred");
-        errorBody.put("details", ex.getMessage());
-
-        return new ResponseEntity<>(errorBody, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidationException(MethodArgumentNotValidException ex) {
@@ -36,6 +25,7 @@ public class GlobalExceptionHandler extends  Exception {
                 .collect(Collectors.toList());
 
         Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
         body.put("status", HttpStatus.BAD_REQUEST.value());
         body.put("errors", errors);
 
@@ -48,7 +38,15 @@ public class GlobalExceptionHandler extends  Exception {
         errorBody.put("timestamp", LocalDateTime.now());
         errorBody.put("status", HttpStatus.UNAUTHORIZED.value());
         errorBody.put("message", ex.getMessage());
-
         return new ResponseEntity<>(errorBody, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Object> handleGeneralException(Exception ex) {
+        Map<String, Object> errorBody = new HashMap<>();
+        errorBody.put("timestamp", LocalDateTime.now());
+        errorBody.put("message", "An unexpected error occurred");
+        errorBody.put("details", ex.getMessage());
+        return new ResponseEntity<>(errorBody, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

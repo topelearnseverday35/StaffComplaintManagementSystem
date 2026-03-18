@@ -12,7 +12,7 @@ public class ComplaintSubmittedEvents extends ApplicationEvent {
     private final String staffName;
 
     public ComplaintSubmittedEvents(Object source, StaffComplaint complaint,
-                                   String staffEmail, String staffName) {
+                                    String staffEmail, String staffName) {
         super(source);
         this.complaint = complaint;
         this.staffEmail = staffEmail;

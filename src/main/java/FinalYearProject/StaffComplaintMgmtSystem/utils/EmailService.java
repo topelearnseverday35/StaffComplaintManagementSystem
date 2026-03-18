@@ -23,7 +23,6 @@ public class EmailService {
 
     @Value("${app.name:Staff Complaint Management System}")
     private String appName;
-
     /**
      * Sends an HTML email asynchronously so it never blocks request threads.
      */
@@ -125,6 +124,35 @@ public class EmailService {
                                 {"Category", category},
                                 {"Priority", badgeHtml(priority)}
                         }) +
+                        "<p>Please log in to the portal to review and take action.</p>",
+                "View Complaint", "#"
+        );
+    }
+
+    /** Email sent to all Deans when a HOD escalates a complaint to Dean level */
+    public String buildComplaintEscalatedEmail(String deanName, String hodName,
+                                               String complaintTitle, String submittedByName,
+                                               String category, String priority,
+                                               String escalationNote, Long complaintId) {
+        String noteSection = (escalationNote != null && !escalationNote.isBlank())
+                ? "<div style='background:#1e293b;border-left:4px solid #f59e0b;padding:16px;margin:16px 0;border-radius:4px;'>"
+                + "<strong style='color:#fcd34d;'>HOD's Escalation Note:</strong>"
+                + "<p style='color:#cbd5e1;margin-top:8px;'>" + escalationNote + "</p></div>"
+                : "";
+
+        return baseTemplate(
+                "Complaint Escalated to Dean Level",
+                "Hello " + deanName + ",",
+                "<p>A complaint has been escalated to your attention by HOD <strong>" + hodName + "</strong>.</p>" +
+                        detailsTable(new String[][]{
+                                {"Complaint ID", "#" + complaintId},
+                                {"Title", complaintTitle},
+                                {"Originally Submitted By", submittedByName},
+                                {"Escalated By (HOD)", hodName},
+                                {"Category", category},
+                                {"Priority", badgeHtml(priority)}
+                        }) +
+                        noteSection +
                         "<p>Please log in to the portal to review and take action.</p>",
                 "View Complaint", "#"
         );

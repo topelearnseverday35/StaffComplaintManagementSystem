@@ -1,6 +1,7 @@
 package FinalYearProject.StaffComplaintMgmtSystem.entities;
 
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Category;
+import FinalYearProject.StaffComplaintMgmtSystem.enums.EscalationLevel;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Priority;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Status;
 import jakarta.persistence.*;
@@ -48,7 +49,31 @@ public class StaffComplaint {
     private Status status = Status.OPEN;
 
     // ----------------------------------------------------------------
-    // SUBMITTER INFO (populated from authenticated UserInfo at submit time)
+    // ESCALATION — tracks which level currently owns this complaint
+    //   HOD_LEVEL  → submitted by LECTURER, visible only to HOD
+    //   DEAN_LEVEL → escalated by HOD, now visible to DEAN
+    // ----------------------------------------------------------------
+    @Enumerated(EnumType.STRING)
+    @Column(name = "escalation_level", nullable = false)
+    @Builder.Default
+    private EscalationLevel escalationLevel = EscalationLevel.HOD_LEVEL;
+
+    /** StaffId of the HOD who escalated this complaint to Dean (null if not escalated) */
+    @Column(name = "escalated_by_staff_id")
+    private String escalatedByStaffId;
+
+    @Column(name = "escalated_by_name")
+    private String escalatedByName;
+
+    @Column(name = "escalated_at")
+    private LocalDateTime escalatedAt;
+
+    /** Optional note the HOD can add when escalating */
+    @Column(name = "escalation_note", columnDefinition = "TEXT")
+    private String escalationNote;
+
+    // ----------------------------------------------------------------
+    // SUBMITTER INFO
     // ----------------------------------------------------------------
     @Column(name = "submitted_by_staff_id")
     private String submittedByStaffId;
@@ -58,6 +83,10 @@ public class StaffComplaint {
 
     @Column(name = "submitted_by_email")
     private String submittedByEmail;
+
+    /** Role of the person who submitted — used to filter by role */
+    @Column(name = "submitted_by_role")
+    private String submittedByRole;
 
     // ----------------------------------------------------------------
     // ADMIN / HANDLER INFO

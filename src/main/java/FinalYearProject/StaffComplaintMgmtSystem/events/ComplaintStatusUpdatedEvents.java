@@ -14,8 +14,8 @@ public class ComplaintStatusUpdatedEvents extends ApplicationEvent {
     private final String staffName;
 
     public ComplaintStatusUpdatedEvents(Object source, StaffComplaint complaint,
-                                       Status previousStatus,
-                                       String staffEmail, String staffName) {
+                                        Status previousStatus,
+                                        String staffEmail, String staffName) {
         super(source);
         this.complaint = complaint;
         this.previousStatus = previousStatus;

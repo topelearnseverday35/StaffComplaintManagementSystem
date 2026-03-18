@@ -1,13 +1,8 @@
 package FinalYearProject.StaffComplaintMgmtSystem.events;
 
-
 import FinalYearProject.StaffComplaintMgmtSystem.entities.StaffComplaint;
-import lombok.Data;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEvent;
-import org.springframework.stereotype.Service;
 
 /**
  * Fired when admin assigns a complaint to a manager.
@@ -22,8 +17,8 @@ public class ComplaintAssignedEvents extends ApplicationEvent {
     private final String assignedByName;
 
     public ComplaintAssignedEvents(Object source, StaffComplaint complaint,
-                                  String managerEmail, String managerName,
-                                  String assignedByName) {
+                                   String managerEmail, String managerName,
+                                   String assignedByName) {
         super(source);
         this.complaint = complaint;
         this.managerEmail = managerEmail;

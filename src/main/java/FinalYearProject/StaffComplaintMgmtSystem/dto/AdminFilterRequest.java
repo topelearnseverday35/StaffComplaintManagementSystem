@@ -1,14 +1,15 @@
 package FinalYearProject.StaffComplaintMgmtSystem.dto;
 
-import lombok.AllArgsConstructor;
+import FinalYearProject.StaffComplaintMgmtSystem.enums.Status;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class SearchRequest {
-    private String keyword;
+public class AdminFilterRequest {
+    private Status status;   // optional filter
     private Integer page;
     private Integer size;
 }
