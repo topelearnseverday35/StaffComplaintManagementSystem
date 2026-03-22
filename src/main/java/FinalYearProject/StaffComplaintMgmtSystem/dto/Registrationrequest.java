@@ -1,8 +1,8 @@
 package FinalYearProject.StaffComplaintMgmtSystem.dto;
 
-
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -30,10 +30,16 @@ public class Registrationrequest {
     private String address;
 
     @Size(min = 8, max = 100, message = "Password must be at least 8 characters long")
-    @Pattern(regexp = "^(?=(?:.*\\d){2,})(?=.*[!@#$%^&*()_+{}\\[\\]:;<>,.?~\\-]).{8,}$",
-            message = "Password must be at least 8 characters long, include at least 1 special character and 2 numbers")
+    @Pattern(
+            regexp = "^(?=(?:.*\\d){2,})(?=.*[!@#$%^&*()_+{}\\[\\]:;<>,.?~\\-]).{8,}$",
+            message = "Password must be at least 8 characters, 1 special character and 2 numbers"
+    )
     private String password;
 
     @NotBlank(message = "Role Must Not Be Blank")
     private String role;
+
+    /** Babcock University department — required for complaint scoping */
+    @NotBlank(message = "Department must not be blank")
+    private String department;
 }

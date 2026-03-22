@@ -1,6 +1,7 @@
 package FinalYearProject.StaffComplaintMgmtSystem.dto;
 
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Category;
+import FinalYearProject.StaffComplaintMgmtSystem.enums.Department;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.EscalationLevel;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Priority;
 import FinalYearProject.StaffComplaintMgmtSystem.enums.Status;
@@ -33,6 +34,8 @@ public class ComplaintResponse {
     private String submittedByName;
     private String submittedByEmail;
     private String submittedByRole;
+    private Department submittedByDepartment;
+    private String submittedBySchool;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime resolvedAt;

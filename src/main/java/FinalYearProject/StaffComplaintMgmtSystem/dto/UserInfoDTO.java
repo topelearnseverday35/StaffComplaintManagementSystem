@@ -14,4 +14,6 @@ public class UserInfoDTO {
     private String username;
     private String email;
     private List<String> role;
+    private String department;   // enum name e.g. "COMPUTING_COMPUTER_SCIENCE"
+    private String school;       // display school e.g. "School of Computing & Engineering Sciences"
 }
