@@ -167,7 +167,7 @@ public class Registration {
 
                 Collection<? extends GrantedAuthority> authorities = acct.getAuthorities();
                 List<String> roles = authorities.stream()
-                        .map(a -> "ROLE_" + a.getAuthority())
+                        .map(a -> a.getAuthority())   // plain name: "HOD", "DEAN", "LECTURER"
                         .collect(Collectors.toList());
 
                 UserInfoDTO userDto = new UserInfoDTO(

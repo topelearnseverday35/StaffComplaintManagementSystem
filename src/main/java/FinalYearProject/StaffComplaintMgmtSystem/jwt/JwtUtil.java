@@ -1,7 +1,5 @@
 package FinalYearProject.StaffComplaintMgmtSystem.jwt;
 
-
-
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -25,32 +23,31 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class JwtUtil {
 
-//    private final CustomUserDetailsService detailsService;
-
     @Value("${application.secret.key}")
     private String SecretKey;
-    private static final long EXPIRATION = 1000 * 60 * 15; // 15 minutes
-    private static final long REFRESH_TOKEN_EXPIRATION = 1000L * 60 * 60 * 24 * 7; // 7 days
 
+    // 15-minute token — increase to 1 day if you don't want frequent re-logins
+    private static final long EXPIRATION = 1000L * 60 * 60 * 24; // 24 hours
 
-    private Key getSignInKey(){
+    private Key getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(SecretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-
-    // ✅ Generate JWT token with roles claim
-    public String  generateToken(UserDetails userDetails) {
-        log.info("Generating JWT token for {}", userDetails.getUsername());
-
-        // Convert authorities to a list of role strings
+    /**
+     * Stores roles WITHOUT the "ROLE_" prefix (e.g. "HOD", "DEAN", "LECTURER").
+     * This matches @PreAuthorize("hasAnyAuthority('HOD', 'DEAN')") on the controllers.
+     * hasAnyRole('HOD') and hasAnyAuthority('HOD') both work when prefix is absent.
+     */
+    public String generateToken(UserDetails userDetails) {
         Collection<? extends GrantedAuthority> authorities = userDetails.getAuthorities();
-        log.info("Authorities : {}", authorities);
-        List<String> roles = authorities.stream()
-                .map(authority -> "ROLE_" + authority.getAuthority())
-                .collect(Collectors.toList());
-        log.info("Roles : {}", roles);
 
+        // Store plain role names: "HOD", "DEAN", "LECTURER" — no ROLE_ prefix
+        List<String> roles = authorities.stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toList());
+
+        log.info("Generating token for {} with roles: {}", userDetails.getUsername(), roles);
 
         return Jwts.builder()
                 .setSubject(userDetails.getUsername())
@@ -61,26 +58,22 @@ public class JwtUtil {
                 .compact();
     }
 
-    // ✅ Extract username (subject)
     public String extractUsername(String token) {
         return getClaims(token).getSubject();
     }
 
-    // ✅ Extract roles safely
     public List<String> extractRoles(String token) {
         Object roles = getClaims(token).get("roles");
         if (roles instanceof List<?>) {
             return ((List<?>) roles).stream()
-                    .filter(role -> role instanceof String)
-                    .map(role -> (String) role)
+                    .filter(r -> r instanceof String)
+                    .map(r -> (String) r)
                     .collect(Collectors.toList());
         }
-        return List.of(); // fallback
+        return List.of();
     }
 
-    // ✅ Validate token expiration
     public boolean validateToken(String token) {
-
         try {
             return !getClaims(token).getExpiration().before(new Date());
         } catch (Exception e) {
@@ -89,10 +82,8 @@ public class JwtUtil {
         }
     }
 
-    // ✅ Private helper to extract all claims
     private Claims getClaims(String token) {
-        return Jwts
-                .parserBuilder()
+        return Jwts.parserBuilder()
                 .setSigningKey(getSignInKey())
                 .build()
                 .parseClaimsJws(token)
